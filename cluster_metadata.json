@@ -1,0 +1,52 @@
+{
+  "n_clusters": 5,
+  "cluster_features": [
+    "decline_ratio_gas",
+    "decline_ratio_oil",
+    "decline_ratio_boe",
+    "water_gas_ratio",
+    "water_oil_ratio",
+    "water_boe_ratio",
+    "first_yr_pi",
+    "Months Produced",
+    "log_last_12_boe_equiv",
+    "True Vertical Depth",
+    "is_horizontal",
+    "had_recompletion",
+    "Production Type_GAS",
+    "Production Type_OIL",
+    "Production Type_OIL & GAS"
+  ],
+  "descriptions": {
+    "1": "Cluster 1: Mature Conventional Gas \u2014 declining vertical wells, deep formations, East/South Texas",
+    "2": "Cluster 2: Mature Conventional Oil/Mixed \u2014 Gulf Coast formations, further declined, more P&A",
+    "3": "Cluster 3: Legacy End-of-Life \u2014 40-year-old nearly depleted conventional wells",
+    "4": "Cluster 4: Modern Shale/Tight \u2014 young wells at or near peak, Barnett/Haynesville/Eagle Ford",
+    "5": "Cluster 5: Active Horizontal \u2014 100% currently producing, high-productivity horizontal wells"
+  },
+  "well_counts": {
+    "0": 49963,
+    "1": 39861,
+    "2": 1914,
+    "3": 28041,
+    "4": 2502
+  },
+  "silhouette_scores": {
+    "2": 0.2142,
+    "3": 0.2172,
+    "4": 0.2125,
+    "5": 0.2317,
+    "6": 0.243,
+    "7": 0.234,
+    "8": 0.2568,
+    "9": 0.26,
+    "10": 0.2788,
+    "11": 0.2803,
+    "12": 0.2682
+  },
+  "best_k_silhouette": 11,
+  "pca_variance": [
+    0.2184,
+    0.1494
+  ]
+}
