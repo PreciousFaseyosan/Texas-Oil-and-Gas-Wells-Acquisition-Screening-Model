@@ -1,38 +1,16 @@
-# ==============================================================
-# PROJECT : ML Well Performance Clustering & Remaining Life
-# SCRIPT  : 06_dashboard.py — Interactive Streamlit Dashboard
-# AUTHOR  : Precious Faseyosan
-# ==============================================================
+# Well Performance Analyser - Interactive Streamlit Dashboard
+# Author: Precious Faseyosan
 #
-# WHAT THIS APP DOES
-# ------------------
-# A fully public-facing web application that allows any operator
-# to upload a raw Enverus Wells Table CSV export and receive:
+# Upload an Enverus Wells Table CSV to get:
+# - Formation ranking by acquisition quality score
+# - Cluster profiles and remaining life estimates
+# - Formation-cluster heatmap, individual well scoring, economic sensitivity
 #
-#   1. Formation ranking by acquisition quality score
-#   2. Cluster profiles for their uploaded wells
-#   3. Formation-cluster distribution heatmap
-#   4. Individual well scoring table with download
-#   5. Economic sensitivity analysis
+# Required files: cluster_model.joblib, cluster_scaler.joblib, cluster_metadata.json
+# Run: streamlit run 06_dashboard.py
 #
-# HOW TO RUN:
-#   pip install streamlit pandas numpy scikit-learn joblib plotly openpyxl
-#   streamlit run 06_dashboard.py
-#
-# REQUIRED FILES (must be in the same folder):
-#   cluster_model.joblib      trained K-Means model (from 03_clustering.py)
-#   cluster_scaler.joblib     fitted scaler (from 03_clustering.py)
-#   cluster_metadata.json     cluster info (from 03_clustering.py)
-#
-# INPUT:
-#   Raw Enverus Wells Table CSV export — no pre-processing needed
-#
-# PUBLIC USE NOTE:
-#   This app is designed for any operator to use. It applies a model
-#   trained on Texas wells (East Texas, Gulf Coast West, Gulf Coast
-#   Central) to any uploaded well dataset. Results are most reliable
-#   for Texas onshore wells from these basins.
-# ==============================================================
+# Note: Model trained on Texas onshore wells (East Texas, Gulf Coast West,
+# Gulf Coast Central). Results are most reliable for these basins.
 
 import streamlit as st
 import pandas as pd
@@ -47,10 +25,6 @@ import os
 from io import BytesIO
 
 warnings.filterwarnings('ignore')
-
-# ==============================================================
-# PAGE CONFIGURATION
-# ==============================================================
 
 st.set_page_config(
     page_title="Well Performance Analyser",
@@ -88,10 +62,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-
-# ==============================================================
-# CONSTANTS
-# ==============================================================
 
 FORMATION_MAP = {
     'EAGLE FORD':               'EAGLEFORD',
@@ -146,10 +116,6 @@ MIN_MONTHS      = 24
 MAX_REMAINING   = 180   # 15-year cap
 
 
-# ==============================================================
-# MODEL LOADING
-# ==============================================================
-
 @st.cache_resource
 def load_models():
     """Load trained K-Means model, scaler, and metadata."""
@@ -164,16 +130,8 @@ def load_models():
         return None, None, None, str(e)
 
 
-# ==============================================================
-# PIPELINE FUNCTIONS
-# ==============================================================
-
 def clean_data(df_raw):
-    """
-    Streamlined cleaning pipeline for dashboard use.
-    Reproduces key steps from 02_cleaning.py.
-    Returns cleaned dataframe and a status message.
-    """
+    """Clean raw Enverus CSV and return (df, status_message)."""
     df = df_raw.copy()
     n0 = len(df)
 
@@ -184,11 +142,9 @@ def clean_data(df_raw):
             .replace(FORMATION_MAP)
         )
 
-    # Filter production types
     if 'Production Type' in df.columns:
         df = df[df['Production Type'].isin(KEEP_PROD_TYPES)]
 
-    # Filter well statuses
     if 'Well Status' in df.columns:
         df = df[df['Well Status'].isin(KEEP_STATUSES)]
 
@@ -196,9 +152,7 @@ def clean_data(df_raw):
     if 'Target Formation' in df.columns:
         df = df[df['Target Formation'].str.upper() != 'WILDCAT']
 
-    # Handle API14 recompletion duplicates
-    # In Enverus, all production lives on the original completion (code 00)
-    # Recompletion rows (01, 02...) are empty registration records only
+    # Keep only original completion (code 00) - recompletion rows carry no production data
     if 'API14' in df.columns:
         df['_api14_str'] = df['API14'].astype(str).str.replace('-', '').str.strip()
         df['_api12']     = df['_api14_str'].str[:12]
@@ -206,7 +160,6 @@ def clean_data(df_raw):
             df['_api14_str'].str[12:14], errors='coerce'
         ).fillna(0).astype(int)
 
-        # Flag wells with recompletions
         apis_with_recomplete = (
             df[df['_comp_code'] > 0]['_api12'].unique()
         )
@@ -218,7 +171,6 @@ def clean_data(df_raw):
     else:
         df['had_recompletion'] = 0
 
-    # Minimum production history
     if 'Months Produced' in df.columns:
         df = df[df['Months Produced'].notna() & (df['Months Produced'] >= MIN_MONTHS)]
 
@@ -235,7 +187,6 @@ def clean_data(df_raw):
         if df[col].isnull().any():
             df[col] = df[col].fillna(df[col].median())
 
-    # Fill missing categoricals
     for col in ['Target Formation', 'Production Type', 'Well Status',
                 'DI Basin', 'Drill Type']:
         if col in df.columns:
@@ -247,10 +198,7 @@ def clean_data(df_raw):
 
 
 def engineer_features(df):
-    """
-    Reproduce feature engineering from 02_cleaning.py.
-    Computes all features needed by the clustering model.
-    """
+    """Reproduce feature engineering from 02_cleaning.py for all clustering features."""
     df = df.copy()
 
     # Ensure required numeric columns exist (fill 0 if missing)
@@ -262,10 +210,9 @@ def engineer_features(df):
         if col not in df.columns:
             df[col] = 0.0
 
-    # Months since peak
     df['months_since_peak'] = (df['Months Produced'] - 12).clip(lower=1)
 
-    # Decline ratios — gas, oil, BOE
+    # Decline ratios - gas, oil, BOE
     df['last_12_boe_equiv'] = df['Last 12 Gas'] / 6 + df['Last 12 Oil']
 
     df['decline_ratio_gas'] = (
@@ -280,7 +227,7 @@ def engineer_features(df):
         df['last_12_boe_equiv'] / (df['Peak BOE'] + 1)
     ).clip(0.001, 1.5)
 
-    # Water ratios — gas, oil, BOE
+    # Water ratios - gas, oil, BOE
     for ratio, num, denom in [
         ('water_gas_ratio', 'Cum Water', 'Last 12 Gas'),
         ('water_oil_ratio', 'Cum Water', 'Last 12 Oil'),
@@ -295,7 +242,6 @@ def engineer_features(df):
         df['First 12 BOE'] / (df['Gross Perforated Interval'] + 1)
     )
 
-    # Is horizontal
     if 'Drill Type' in df.columns:
         df['is_horizontal'] = (df['Drill Type'] == 'H').astype(int)
     else:
@@ -304,7 +250,6 @@ def engineer_features(df):
     # Log-transformed BOE rate (primary clustering feature)
     df['log_last_12_boe_equiv'] = np.log1p(df['last_12_boe_equiv'].clip(lower=0))
 
-    # Production type dummies
     for pt in ['GAS', 'OIL', 'OIL & GAS']:
         col = f'Production Type_{pt}'
         if 'Production Type' in df.columns:
@@ -316,11 +261,7 @@ def engineer_features(df):
 
 
 def assign_clusters(df, model, scaler):
-    """
-    Assign K-Means clusters to wells using the trained model.
-    Cluster labels are shifted to 1-5 (matching Script 03).
-    """
-    # Select and validate cluster features
+    """Assign K-Means clusters. Labels shifted to 1-based to match training script."""
     missing = [f for f in CLUSTER_FEATURES if f not in df.columns]
     if missing:
         return df, f"Missing features for clustering: {missing}"
@@ -334,18 +275,13 @@ def assign_clusters(df, model, scaler):
 
 
 def calculate_remaining_life(df, gas_price, oil_price, monthly_opex):
-    """
-    Calculate remaining productive life using combined revenue approach.
-    t = -ln(OPEX / Revenue) / D_boe
-    """
+    """Estimate remaining life (months) via exponential decline: t = -ln(OPEX/Revenue) / D_boe."""
     df = df.copy()
     MAX_REMAINING = 180   # 15-year cap
 
-    # Current monthly rates (recover from raw columns)
     df['monthly_gas'] = df.get('Last 12 Gas', pd.Series(0, index=df.index)) / 12
     df['monthly_oil'] = df.get('Last 12 Oil', pd.Series(0, index=df.index)) / 12
 
-    # Combined monthly revenue
     df['monthly_revenue'] = (
         df['monthly_gas'] * gas_price +
         df['monthly_oil'] * oil_price
@@ -383,10 +319,7 @@ def calculate_remaining_life(df, gas_price, oil_price, monthly_opex):
 
 
 def rank_formations(df, w1, w2, w3, w4):
-    """
-    Compute weighted formation ranking from well-level data.
-    Returns formation summary dataframe sorted by score.
-    """
+    """Return formation summary dataframe ranked by weighted acquisition quality score."""
     if 'Target Formation' not in df.columns:
         return pd.DataFrame()
 
@@ -450,18 +383,11 @@ def rank_formations(df, w1, w2, w3, w4):
 
 @st.cache_data(show_spinner=False)
 def run_full_pipeline(_df_raw, gas_price, oil_price, monthly_opex, w1, w2, w3, w4):
-    """
-    End-to-end pipeline: raw CSV → results.
-    Cached so re-running with new prices is fast.
-    """
+    """Run full pipeline: clean -> feature engineer. Cached for fast price/weight changes."""
     df, clean_msg  = clean_data(_df_raw)
     df             = engineer_features(df)
     return df, clean_msg
 
-
-# ==============================================================
-# SIDEBAR
-# ==============================================================
 
 with st.sidebar:
     st.markdown("## 🛢️ Well Performance Analyser")
@@ -516,10 +442,6 @@ with st.sidebar:
     )
 
 
-# ==============================================================
-# MAIN PANEL
-# ==============================================================
-
 st.markdown('<p class="main-header">🛢️ Well Performance Analyser</p>',
             unsafe_allow_html=True)
 st.markdown(
@@ -530,7 +452,6 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-# Load models
 model, scaler, metadata, model_err = load_models()
 
 if model_err:
@@ -557,32 +478,28 @@ if uploaded_file is None:
     with c1:
         st.markdown("""
         **Formation Ranking**
-        Ranks formations in your uploaded dataset by a composite acquisition 
-        quality score — combining remaining productive life, decline stability, 
+        Ranks formations in your uploaded dataset by a composite acquisition
+        quality score — combining remaining productive life, decline stability,
         water loading, and initial productivity, weighted by your priorities.
 
         **Well Clustering**
-        Assigns each well to one of five behavioural clusters using a K-Means 
-        model trained on 122,000 Texas wells. Clusters reflect production 
+        Assigns each well to one of five behavioural clusters using a K-Means
+        model trained on 122,000 Texas wells. Clusters reflect production
         behaviour patterns, not formation labels.
         """)
     with c2:
         st.markdown("""
         **Remaining Life Estimation**
-        Projects how many months each active well will continue generating 
-        revenue above your stated OPEX, using exponential decline mathematics 
+        Projects how many months each active well will continue generating
+        revenue above your stated OPEX, using exponential decline mathematics
         applied to combined gas + oil revenue.
 
         **Economic Sensitivity**
-        Shows how formation rankings and remaining life estimates shift across 
-        a range of gas and oil price scenarios — critical for acquisition 
+        Shows how formation rankings and remaining life estimates shift across
+        a range of gas and oil price scenarios — critical for acquisition
         underwriting under price uncertainty.
         """)
     st.stop()
-
-# ==============================================================
-# DATA PROCESSING
-# ==============================================================
 
 with st.spinner("Reading file..."):
     try:
@@ -611,26 +528,19 @@ with st.spinner("Running pipeline: cleaning → clustering → remaining life...
         st.error("No wells remaining after cleaning. Check your data format.")
         st.stop()
 
-    # Cluster assignment (not cached — depends on slider changes)
+    # Cluster assignment (not cached - depends on slider changes)
     df_clean, cluster_err = assign_clusters(df_clean, model, scaler)
     if cluster_err:
         st.warning(f"Clustering issue: {cluster_err}. Proceeding without cluster assignment.")
 
-    # Remaining life
     df_clean = calculate_remaining_life(
         df_clean, gas_price, oil_price, monthly_opex
     )
 
-    # Formation ranking
     formation_ranked = rank_formations(df_clean, w1, w2, w3, w4)
 
-# Subsets
 active_wells = df_clean[df_clean['economic_status'] == 'active']
 ended_wells  = df_clean[df_clean['economic_status'] == 'ended']
-
-# ==============================================================
-# SUMMARY METRICS
-# ==============================================================
 
 st.success(f"✓ {clean_msg}")
 st.markdown("---")
@@ -649,10 +559,6 @@ m5.metric("Median Remaining Life (Active)",
 
 st.markdown("---")
 
-# ==============================================================
-# TABS
-# ==============================================================
-
 tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "📊 Formation Ranking",
     "🔬 Cluster Profiles",
@@ -662,9 +568,7 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
 ])
 
 
-# ---------------------------------------------------------------
-# TAB 1: FORMATION RANKING
-# ---------------------------------------------------------------
+# --- Tab 1: Formation Ranking
 with tab1:
     st.markdown("### Formation Ranking by Acquisition Quality Score")
     st.caption(
@@ -676,7 +580,6 @@ with tab1:
     if len(formation_ranked) == 0:
         st.warning("Not enough formation data to rank. Need at least 5 wells per formation.")
     else:
-        # Bar chart
         top_n = min(20, len(formation_ranked))
         top_df = formation_ranked.head(top_n).reset_index()
 
@@ -706,7 +609,6 @@ with tab1:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Table
         st.markdown("#### Full Formation Ranking Table")
         display_df = formation_ranked[
             ['rank', 'well_count', 'weighted_score',
@@ -720,7 +622,6 @@ with tab1:
         ]
         st.dataframe(display_df, use_container_width=True)
 
-        # Download button
         csv_buffer = BytesIO()
         formation_ranked.to_csv(csv_buffer)
         st.download_button(
@@ -731,9 +632,7 @@ with tab1:
         )
 
 
-# ---------------------------------------------------------------
-# TAB 2: CLUSTER PROFILES
-# ---------------------------------------------------------------
+# --- Tab 2: Cluster Profiles
 with tab2:
     st.markdown("### Well Cluster Profiles")
     st.caption(
@@ -745,10 +644,8 @@ with tab2:
     if 'cluster' not in df_clean.columns:
         st.warning("Cluster assignment not available.")
     else:
-        # Cluster counts
         cluster_counts = df_clean['cluster'].value_counts().sort_index()
 
-        # Profile chart
         profile_cols = [
             'decline_ratio_boe', 'water_boe_ratio', 'first_yr_pi',
             'Months Produced', 'log_last_12_boe_equiv', 'True Vertical Depth',
@@ -759,7 +656,6 @@ with tab2:
         profiles = df_clean.groupby('cluster')[profile_cols].mean()
         profiles_norm = (profiles - profiles.min()) / (profiles.max() - profiles.min() + 1e-9)
 
-        # Cluster description cards
         st.markdown("#### Cluster Descriptions")
         col_cards = st.columns(5)
         for i, (c, desc_text) in enumerate(CLUSTER_DESCRIPTIONS.items()):
@@ -774,7 +670,6 @@ with tab2:
 
         st.markdown("---")
 
-        # Profile radar / bar chart
         st.markdown("#### Feature Profile by Cluster (Normalised 0–1)")
 
         fig = go.Figure()
@@ -797,7 +692,6 @@ with tab2:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # Cluster remaining life box plot
         st.markdown("#### Remaining Life by Cluster — Active Wells Only")
         fig2 = go.Figure()
         for c, color in zip(sorted(df_clean['cluster'].unique()), colors):
@@ -822,9 +716,7 @@ with tab2:
         st.plotly_chart(fig2, use_container_width=True)
 
 
-# ---------------------------------------------------------------
-# TAB 3: FORMATION × CLUSTER HEATMAP
-# ---------------------------------------------------------------
+# --- Tab 3: Formation x Cluster Heatmap
 with tab3:
     st.markdown("### Formation × Cluster Distribution")
     st.caption(
@@ -854,7 +746,6 @@ with tab3:
                 normalize='index'
             ) * 100
 
-            # Rename columns
             crosstab.columns = [
                 CLUSTER_LABELS.get(int(c), f'C{c}')
                 for c in crosstab.columns
@@ -882,9 +773,7 @@ with tab3:
             st.warning("Not enough named formation data for heatmap.")
 
 
-# ---------------------------------------------------------------
-# TAB 4: WELL SCORING TABLE
-# ---------------------------------------------------------------
+# --- Tab 4: Well Scoring
 with tab4:
     st.markdown("### Individual Well Scoring")
     st.caption(
@@ -893,7 +782,6 @@ with tab4:
         "Active wells ranked first."
     )
 
-    # Compute well-level scores
     def norm_series(s, higher=True):
         mn, mx = s.min(), s.max()
         if mx == mn:
@@ -918,7 +806,6 @@ with tab4:
         ascending=False, method='min'
     ).astype(int)
 
-    # Select display columns
     id_cols = [c for c in [
         'API14', 'Well Name', 'Operator Company Name',
         'County/Parish', 'Target Formation', 'Well Status',
@@ -963,7 +850,6 @@ with tab4:
     st.markdown(f"**Showing {len(filtered):,} wells**")
     st.dataframe(filtered.head(500), use_container_width=True)
 
-    # Download
     csv_buf = BytesIO()
     well_table.to_csv(csv_buf, index=False)
     st.download_button(
@@ -974,9 +860,7 @@ with tab4:
     )
 
 
-# ---------------------------------------------------------------
-# TAB 5: ECONOMIC SENSITIVITY
-# ---------------------------------------------------------------
+# --- Tab 5: Economic Sensitivity
 with tab5:
     st.markdown("### Economic Sensitivity Analysis")
     st.caption(
@@ -1081,7 +965,6 @@ with tab5:
         )
         st.plotly_chart(fig_oil, use_container_width=True)
 
-    # OPEX sensitivity table
     st.markdown("#### OPEX Sensitivity — Active Well Count at Current Prices")
     opex_vals = [1000, 1500, 2000, 2500, 3000, 4000, 5000, 7500, 10000]
     opex_results = []
