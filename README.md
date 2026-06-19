@@ -45,13 +45,13 @@ Assigns each well to one of five behavioural clusters using the trained K-Means 
 | C5 | Active Horizontal | 100% producing horizontal wells, highest per-well productivity |
 
 ### 🗺️ Tab 3 — Formation × Cluster Heatmap
-Shows how each formation's wells distribute across the five clusters — revealing whether a formation is dominated by legacy declining inventory or active modern completions.
+Shows how each formation's wells distribute across the five clusters, revealing whether a formation is dominated by legacy declining inventory or active modern completions.
 
 ### 🏭 Tab 4 — Individual Well Scoring
 Scores and ranks every well in the uploaded dataset. Filterable by economic status, formation, and cluster. Exportable as CSV.
 
 ### 📈 Tab 5 — Economic Sensitivity Analysis
-Shows how portfolio remaining life and the count of economic wells shift across gas and oil price scenarios — critical for acquisition underwriting under commodity price uncertainty.
+Shows how portfolio remaining life and the count of economic wells shift across gas and oil price scenarios, critical for acquisition underwriting under commodity price uncertainty.
 
 ---
 
@@ -134,7 +134,6 @@ Remaining life capped at 180 months (15 years).
 - Retrain on multi-basin dataset for broader generalisability
 - Add hyperbolic/harmonic decline curve fitting
 - Build supervised classifier for targeted acquisition criteria
-- Add GIS mapping for geographic screening
 - Individual well decline curve visualisation
 
 ---
@@ -142,16 +141,10 @@ Remaining life capped at 180 months (15 years).
 ## 👤 Author
 
 **Precious Faseyosan**  
-Graduate Petroleum Engineer | MSc Data Science Candidate
+Graduate Petroleum Engineer | MSc Data Science Scholar
 
 - 🔗 [LinkedIn](https://www.linkedin.com/in/precious-faseyosan)
 - 💻 [GitHub](https://github.com/PreciousFaseyosan)
 - 🌐 [Live App](https://acquisitionscreeningmodel.streamlit.app)
 
-*Built as part of the Machine Learning Fundamentals course — MSc Data Science, Nigerian University of Technology and Management (NUTM), 2024/2025.*
-
----
-
-## 📄 License
-
-This project is open source and available under the MIT License.
+*Built as part of the Machine Learning Fundamentals course, MSc Data Science, Nigerian University of Technology and Management (NUTM), 2024/2025.*
